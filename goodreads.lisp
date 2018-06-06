@@ -126,6 +126,7 @@
 
 
 (defun parse-edition-title (title)
+  "Strip edition title of series information in parentheses."
   (multiple-value-bind (match result)
       (cl-ppcre:scan-to-strings "^(.*)(?:\\s\\(.*\\))" title)
     (elt result 0)))
@@ -133,10 +134,11 @@
 
 (defun try-matches (item patterns)
   (loop for (id . p) in patterns
-        with (match groups) = (multiple-value-bind (match groups)
-                                  (cl-ppcre:scan-to-strings p item) (list match groups))
-        if match
-          do (return  `(id ,(elt groups 0)))))
+        with groups
+        do
+           (setq groups (cl-ppcre:scan-to-strings p item))
+        if groups
+          return (cons id groups)))
 
 
 (defun split-edition (edition)
@@ -150,6 +152,7 @@
 
 
 (defun parse-edition-format (format)
+  "Parse string with edition, format and pages into alist with those keys."
   (let ((items (split-edition format))
         (patterns `((format . ,(str:concat "(Paperback|Hardcover|Kindle\\sEdition|"
                                            "Audiobook|Mass\\sMarker\\sPaperback|Audio\\sCD)"))
