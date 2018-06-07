@@ -90,7 +90,11 @@
 
 
 (defun process-edition (edition)
-  (edition-rows-to-strings (edition-dispart-rows edition)))
+  (let ((data (edition-rows-to-strings (edition-dispart-rows edition))))
+    (append
+     `((title . ,(parse-edition-title (cdr (assoc 'title data )))))
+     (parse-edition-format (cdr (assoc 'format data)))
+     (parse-edition-isbn-asin (cdr (assoc 'isbn-asin data))))))
 
 
 (defun edition-dispart-details (details)
@@ -162,6 +166,7 @@
               items)))
 
 (defun parse-edition-isbn-asin (isbn-asin)
+  "Parse string with isbn+isbn13/asin into alist with all those keys."
   (let ((patterns '((isbn . "^(\\w{10})\\s\\(ISBN13:\\s(\\d{13})\\)$")
                     (asin . "^(\\w{10})$"))))
     (destructuring-bind (isbn-or-asin . groups) (try-matches isbn-asin patterns)
