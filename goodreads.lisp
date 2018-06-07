@@ -83,9 +83,8 @@
 (defun get-all-editions (book-id &optional (per-page 999))
   "Manualy parse HTML, editions-api is not for public.
  Official per-page limit is 100, but it works :)"
-  (let* ((url "https://www.goodreads.com/work/editions/~a?per_page=~a")
-         (html (drakma:http-request (format nil url book-id per-page)
-                                    :method :get))
+  (let* ((url (format nil "https://www.goodreads.com/work/editions/~a?per_page=~a" book-id per-page))
+         (html (drakma:http-request url :method :get))
          (root (plump:parse html)))
     (lquery:$ root "div.editionData")))
 
@@ -134,9 +133,9 @@
 
 (defun try-matches (item patterns)
   (loop for (id . p) in patterns
-        with groups
+        with groups and match
         do
-           (setq groups (cl-ppcre:scan-to-strings p item))
+           (multiple-value-setq  (match groups) (cl-ppcre:scan-to-strings p item))
         if groups
           return (cons id groups)))
 
@@ -158,10 +157,17 @@
                                            "Audiobook|Mass\\sMarker\\sPaperback|Audio\\sCD)"))
                     (pages  . "(\\d+(?=\\spages))")
                     (edition . "(.*)"))))
-    (mapcar (lambda (x) (try-matches x patterns)) items)))
+    (mapcar (lambda (x) (destructuring-bind (pattern . item) (try-matches x patterns)
+                          (cons pattern (elt item 0))))
+              items)))
 
-
-
+(defun parse-edition-isbn-asin (isbn-asin)
+  (let ((patterns '((isbn . "^(\\w{10})\\s\\(ISBN13:\\s(\\d{13})\\)$")
+                    (asin . "^(\\w{10})$"))))
+    (destructuring-bind (isbn-or-asin . groups) (try-matches isbn-asin patterns)
+      (if (eq isbn-or-asin 'isbn)
+          `((isbn . ,(elt groups 0)) (isbn13 . ,(elt groups 1)) (asin . nil))
+          `((asin . ,(elt groups 0)) (isbn . nil) (isbn13 . nil))))))
 
 
 
