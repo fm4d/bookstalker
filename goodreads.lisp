@@ -11,6 +11,9 @@
 (defparameter +user-id+ "76812964")
 (defparameter +user-key+ "OY2rDbQV8HRskYZNMEkUPA")
 
+(define-condition unsupported-row-structure (error)
+  ((text :initarg :text :reader text)))
+
 
 (defun divide (sequence index)
   "Divides sequence to 2 sequences after element at index."
@@ -90,17 +93,19 @@
 
 
 (defun process-edition (edition)
-  (ignore-errors
+  (handler-case
    (let ((data (edition-rows-to-strings (edition-dispart-rows edition))))
      (append
       `((title    . ,(parse-edition-title (cdr (assoc 'title data ))))
         (language . ,(cdr (assoc 'language data))))
-      (parse-edition-format (cdr (assoc 'format data)))
-      (parse-edition-isbn-asin (cdr (assoc 'isbn-asin data)))))))
+      (assoc 'format (parse-edition-format (cdr (assoc 'format data))))
+      (parse-edition-isbn-asin (cdr (assoc 'isbn-asin data)))))
+    (unsupported-row-structure () nil)))
 
 
 (defun get-all-editions (book-id &key (per-page 999) (filter-language nil))
-  (let ((editions (map 'list #'process-edition (get-all-raw-editions book-id per-page))))
+  (let ((editions (remove-if #'null
+                             (map 'list #'process-edition (get-all-raw-editions book-id per-page)))))
     (if filter-language
         (remove-if (lambda (e) (string/= filter-language (cdr (assoc 'language e))))
                    editions)
@@ -110,7 +115,7 @@
 (defun edition-dispart-details (details)
   (let ((data-rows (lquery:$ details "div.dataRow" "div.dataValue")))
     (if (/= (length data-rows) 4)
-        (error "Wrong amount of rows in details"))
+        (error 'unsupported-row-structure :text "Wrong amount of rows in details"))
     `((authors   . ,(elt data-rows 0))
       (isbn-asin . ,(elt data-rows 1))
       (language  . ,(elt data-rows 2))
@@ -122,7 +127,7 @@
                      (filter (lambda (n) (string= (lquery-funcs:attr n "class") "dataRow")))))
          (rows-count (length data-rows)))
     (if (not (member rows-count '(3 4)))
-        (error "Unsupported edition rows amount."))
+        (error 'unsupported-row-structure :text "Unsupported edition rows amount."))
     (append `((title     . ,(elt data-rows 0))
               (published . ,(if (= rows-count 4) (elt data-rows 1)))
               (format    . ,(elt data-rows (- rows-count 2))))
@@ -168,7 +173,10 @@
   "Parse string with edition, format and pages into alist with those keys."
   (let ((items (split-edition format))
         (patterns `((format . ,(str:concat "(^Paperback$|^Hardcover$|^Kindle\\sEdition$|^ebook$|"
-                                           "^Audiobook$|^Mass\\sMarker\\sPaperback$|^Audio\\sCD$)"))
+                                           "^Audiobook$|^Mass\\sMarker\\sPaperback$|^Audio\\sCD$|"
+                                           "^nook$|^Library\\sBinding$|^Audio\\sCassette$|"
+                                           "^Audible\\sAudio$|^CD-ROM$|^MP3\\sCD$|^Board\\sbook$|"
+                                           "^Leather\\sBound$|^Unbound$|^Spiral-bound$|^Unknown\\sBinding$)"))
                     (pages  . "(\\d+(?=\\spages))")
                     (edition . "(.*)"))))
     (mapcar (lambda (x) (destructuring-bind (pattern . item) (try-matches x patterns)
@@ -181,5 +189,5 @@
                     (asin . "^(\\w{10})$"))))
     (destructuring-bind (isbn-or-asin . groups) (try-matches isbn-asin patterns)
       (if (eq isbn-or-asin 'isbn)
-          `((isbn . ,(elt groups 0)) (isbn13 . ,(elt groups 1)) (asin . nil))
-          `((asin . ,(elt groups 0)) (isbn . nil) (isbn13 . nil))))))
+          `((isbn . ,(parse-integer (elt groups 0))) (isbn13 . ,(parse-integer (elt groups 1))) (asin . nil))
+          `((asin . ,(parse-integer (elt groups 0))) (isbn . nil) (isbn13 . nil))))))
