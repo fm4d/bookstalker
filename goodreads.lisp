@@ -153,8 +153,8 @@
 (defun parse-edition-format (format)
   "Parse string with edition, format and pages into alist with those keys."
   (let ((items (split-edition format))
-        (patterns `((format . ,(str:concat "(Paperback|Hardcover|Kindle\\sEdition|"
-                                           "Audiobook|Mass\\sMarker\\sPaperback|Audio\\sCD)"))
+        (patterns `((format . ,(str:concat "(^Paperback$|^Hardcover$|^Kindle\\sEdition$|"
+                                           "^Audiobook$|^Mass\\sMarker\\sPaperback$|^Audio\\sCD$)"))
                     (pages  . "(\\d+(?=\\spages))")
                     (edition . "(.*)"))))
     (mapcar (lambda (x) (destructuring-bind (pattern . item) (try-matches x patterns)
