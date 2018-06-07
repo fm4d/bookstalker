@@ -80,7 +80,7 @@
   (mapcar #'get-title-author (get-all-books-from-shelve shelf-name)))
 
 
-(defun get-all-editions (book-id &optional (per-page 999))
+(defun get-all-raw-editions (book-id per-page)
   "Manualy parse HTML, editions-api is not for public.
  Official per-page limit is 100, but it works :)"
   (let* ((url (format nil "https://www.goodreads.com/work/editions/~a?per_page=~a" book-id per-page))
@@ -90,11 +90,21 @@
 
 
 (defun process-edition (edition)
-  (let ((data (edition-rows-to-strings (edition-dispart-rows edition))))
-    (append
-     `((title . ,(parse-edition-title (cdr (assoc 'title data )))))
-     (parse-edition-format (cdr (assoc 'format data)))
-     (parse-edition-isbn-asin (cdr (assoc 'isbn-asin data))))))
+  (ignore-errors
+   (let ((data (edition-rows-to-strings (edition-dispart-rows edition))))
+     (append
+      `((title    . ,(parse-edition-title (cdr (assoc 'title data ))))
+        (language . ,(cdr (assoc 'language data))))
+      (parse-edition-format (cdr (assoc 'format data)))
+      (parse-edition-isbn-asin (cdr (assoc 'isbn-asin data)))))))
+
+
+(defun get-all-editions (book-id &key (per-page 999) (filter-language nil))
+  (let ((editions (map 'list #'process-edition (get-all-raw-editions book-id per-page))))
+    (if filter-language
+        (remove-if (lambda (e) (string/= filter-language (cdr (assoc 'language e))))
+                   editions)
+        editions)))
 
 
 (defun edition-dispart-details (details)
@@ -157,7 +167,7 @@
 (defun parse-edition-format (format)
   "Parse string with edition, format and pages into alist with those keys."
   (let ((items (split-edition format))
-        (patterns `((format . ,(str:concat "(^Paperback$|^Hardcover$|^Kindle\\sEdition$|"
+        (patterns `((format . ,(str:concat "(^Paperback$|^Hardcover$|^Kindle\\sEdition$|^ebook$|"
                                            "^Audiobook$|^Mass\\sMarker\\sPaperback$|^Audio\\sCD$)"))
                     (pages  . "(\\d+(?=\\spages))")
                     (edition . "(.*)"))))
@@ -173,6 +183,3 @@
       (if (eq isbn-or-asin 'isbn)
           `((isbn . ,(elt groups 0)) (isbn13 . ,(elt groups 1)) (asin . nil))
           `((asin . ,(elt groups 0)) (isbn . nil) (isbn13 . nil))))))
-
-
-
