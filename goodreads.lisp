@@ -38,55 +38,61 @@
                                       ("user_id" . ,+user-id+)))))
 
 
-(defun get-page-of-books-from-shelve (shelf-name &optional (page "1") (per-page "200"))
+(defun get-raw-page-from-shelve (shelf-name &optional (page "1") (per-page "200"))
   (flexi-streams:octets-to-string
-   (drakma:http-request (create-url-with-parameters "https://www.goodreads.com/review/list"
-                                                    `(("v" . "2")
-                                                      ("per_page" . ,per-page)
-                                                      ("page" . ,page)
-                                                      ("shelf" . ,shelf-name)
-                                                      ("key" . ,+user-key+)
-                                                      ("id" . ,+user-id+)))
+   (drakma:http-request (create-url-with-parameters
+                         "https://www.goodreads.com/review/list"
+                         `(("v" . "2")
+                           ("per_page" . ,per-page)
+                           ("page" . ,page)
+                           ("shelf" . ,shelf-name)
+                           ("key" . ,+user-key+)
+                           ("id" . ,+user-id+)))
                         :method :get)))
 
-(defun get-books (raw-books)
-  (let ((dom (plump:parse raw-books)))
-    (plump:get-elements-by-tag-name (elt (plump:get-elements-by-tag-name dom "reviews") 0)
-                                    "review")))
+
+(defun get-raw-books (page)
+  (let ((dom (plump:parse page)))
+    (coerce (lquery:$ dom "reviews" "review") 'list)))
 
 
-(defun get-all-books-from-shelve (&optional (shelf-name "to-read"))
+(defun get-all-raw-books-from-shelve (&optional (shelf-name "to-read"))
   (loop
     with page = 1
     with results = nil
     with res = nil
     do
-       (setf res (get-books (get-page-of-books-from-shelve shelf-name (write-to-string page) "200")))
+       (setf res (get-raw-books
+                  (get-raw-page-from-shelve shelf-name
+                                            (write-to-string page)
+                                            "200")))
        (setf results (append results res))
        (incf page)
     when (not (= (length res) 200))
       return results))
 
 
-(defun get-title-author (book)
-  (let ((title (elt (plump:get-elements-by-tag-name book "title_without_series") 0))
-        (author (elt (plump:get-elements-by-tag-name
-                       (elt (plump:get-elements-by-tag-name book "authors") 0)
-                       "name")
-                      0)))
-
-    (list (plump:text title)
-          (plump:text author))))
+(defun get-book-basic-data (book)
+  `((title  . ,(lquery:$ book "title_without_series" (node) (text)))
+    (author . ,(lquery:$ book "authors" "name" (node) (text)))
+    (id     . ,(parse-integer (lquery:$ book "book" "id" (node) (text))))))
 
 
-(defun get-all-titles-authors (&optional (shelf-name "to-read"))
-  (mapcar #'get-title-author (get-all-books-from-shelve shelf-name)))
+(defun get-all-books-from-shelve (&optional (shelf-name "to-read"))
+  (mapcar #'get-book-basic-data (get-all-raw-books-from-shelve shelf-name)))
+
+
+
+
 
 
 (defun get-all-raw-editions (book-id per-page)
   "Manualy parse HTML, editions-api is not for public.
  Official per-page limit is 100, but it works :)"
-  (let* ((url (format nil "https://www.goodreads.com/work/editions/~a?per_page=~a" book-id per-page))
+  (let* ((url (format nil
+                      "https://www.goodreads.com/work/editions/~a?per_page=~a"
+                      book-id
+                      per-page))
          (html (drakma:http-request url :method :get))
          (root (plump:parse html)))
     (lquery:$ root "div.editionData")))
@@ -105,7 +111,9 @@
 
 (defun get-all-editions (book-id &key (per-page 999) (filter-language nil))
   (let ((editions (remove-if #'null
-                             (map 'list #'process-edition (get-all-raw-editions book-id per-page)))))
+                             (map 'list
+                                  #'process-edition
+                                  (get-all-raw-editions book-id per-page)))))
     (if filter-language
         (remove-if (lambda (e) (string/= filter-language (cdr (assoc 'language e))))
                    editions)
@@ -124,7 +132,8 @@
 
 (defun edition-dispart-rows (raw-edition)
   (let* ((data-rows (lquery:$ raw-edition (children)
-                     (filter (lambda (n) (string= (lquery-funcs:attr n "class") "dataRow")))))
+                      (filter (lambda (n) (string= (lquery-funcs:attr n "class")
+                                                   "dataRow")))))
          (rows-count (length data-rows)))
     (if (not (member rows-count '(3 4)))
         (error 'unsupported-row-structure :text "Unsupported edition rows amount."))
@@ -139,7 +148,8 @@
             (destructuring-bind (name . row) row-pair
               `(,name . ,(str:join " " (mapcar #'str:trim
                                                (remove-if #'str:blankp
-                                                          (str:lines (lquery:$ row (text) (node)))))))))
+                                                          (str:lines
+                                                           (lquery:$ row (text) (node)))))))))
           row-pairs))
 
 
@@ -172,16 +182,20 @@
 (defun parse-edition-format (format)
   "Parse string with edition, format and pages into alist with those keys."
   (let ((items (split-edition format))
-        (patterns `((format . ,(str:concat "(^Paperback$|^Hardcover$|^Kindle\\sEdition$|^ebook$|"
-                                           "^Audiobook$|^Mass\\sMarker\\sPaperback$|^Audio\\sCD$|"
-                                           "^nook$|^Library\\sBinding$|^Audio\\sCassette$|"
-                                           "^Audible\\sAudio$|^CD-ROM$|^MP3\\sCD$|^Board\\sbook$|"
-                                           "^Leather\\sBound$|^Unbound$|^Spiral-bound$|^Unknown\\sBinding$)"))
-                    (pages  . "(\\d+(?=\\spages))")
-                    (edition . "(.*)"))))
-    (mapcar (lambda (x) (destructuring-bind (pattern . item) (try-matches x patterns)
-                          (cons pattern (elt item 0))))
-              items)))
+        (patterns
+          `((format . ,(str:concat
+                        "(^Paperback$|^Hardcover$|^Kindle\\sEdition$|^ebook$|"
+                        "^Audiobook$|^Mass\\sMarker\\sPaperback$|^Audio\\sCD$|"
+                        "^nook$|^Library\\sBinding$|^Audio\\sCassette$|"
+                        "^Audible\\sAudio$|^CD-ROM$|^MP3\\sCD$|^Board\\sbook$|"
+                        "^Leather\\sBound$|^Unbound$|^Spiral-bound$|"
+                        "^Unknown\\sBinding$)"))
+            (pages  . "(\\d+(?=\\spages))")
+            (edition . "(.*)"))))
+    (mapcar (lambda (x)
+              (destructuring-bind (pattern . item) (try-matches x patterns)
+                (cons pattern (elt item 0))))
+            items)))
 
 (defun parse-edition-isbn-asin (isbn-asin)
   "Parse string with isbn+isbn13/asin into alist with all those keys."

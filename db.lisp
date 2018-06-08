@@ -35,7 +35,7 @@
   (:metaclass mito:dao-table-class))
 
 
-(defun insert-alist (alist)
+(defun insert-edition (alist)
   (mito:insert-dao
    (apply #'make-instance 'edition (loop for (name . val) in alist
                                          collect (alexandria:make-keyword name)
