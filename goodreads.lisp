@@ -98,7 +98,7 @@
      (append
       `((title    . ,(parse-edition-title (cdr (assoc 'title data ))))
         (language . ,(cdr (assoc 'language data))))
-      (assoc 'format (parse-edition-format (cdr (assoc 'format data))))
+      (list (assoc 'format (parse-edition-format (cdr (assoc 'format data)))))
       (parse-edition-isbn-asin (cdr (assoc 'isbn-asin data)))))
     (unsupported-row-structure () nil)))
 
@@ -189,5 +189,5 @@
                     (asin . "^(\\w{10})$"))))
     (destructuring-bind (isbn-or-asin . groups) (try-matches isbn-asin patterns)
       (if (eq isbn-or-asin 'isbn)
-          `((isbn . ,(parse-integer (elt groups 0))) (isbn13 . ,(parse-integer (elt groups 1))) (asin . nil))
-          `((asin . ,(parse-integer (elt groups 0))) (isbn . nil) (isbn13 . nil))))))
+          `((isbn . ,(elt groups 0)) (isbn13 . ,(elt groups 1)) (asin . nil))
+          `((asin . ,(elt groups 0)) (isbn . nil) (isbn13 . nil))))))
