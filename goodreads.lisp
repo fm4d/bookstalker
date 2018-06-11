@@ -3,6 +3,7 @@
 (ql:quickload "lquery")
 (ql:quickload "str")
 (ql:quickload "cl-ppcre")
+(ql:quickload "assoc-utils")
 
 (declaim (optimize (debug 3)))
 
@@ -73,25 +74,24 @@
 
 
 (defun get-book-basic-data (book)
-  `((title  . ,(lquery:$ book "title_without_series" (node) (text)))
-    (author . ,(lquery:$ book "authors" "name" (node) (text)))
-    (id     . ,(parse-integer (lquery:$ book "book" "id" (node) (text))))))
+  `((title   . ,(lquery:$ book "title_without_series" (node) (text)))
+    (author  . ,(lquery:$ book "authors" "name" (node) (text)))
+    (work-id . ,(parse-integer (lquery:$ book "work" "id" (node) (text))))))
 
 
 (defun get-all-books-from-shelve (&optional (shelf-name "to-read"))
+  "Download all books in shelve via API and return them in alist."
   (mapcar #'get-book-basic-data (get-all-raw-books-from-shelve shelf-name)))
 
 
 
 
-
-
-(defun get-all-raw-editions (book-id per-page)
+(defun get-all-raw-editions (work-id per-page)
   "Manualy parse HTML, editions-api is not for public.
  Official per-page limit is 100, but it works :)"
   (let* ((url (format nil
                       "https://www.goodreads.com/work/editions/~a?per_page=~a"
-                      book-id
+                      work-id
                       per-page))
          (html (drakma:http-request url :method :get))
          (root (plump:parse html)))
@@ -100,20 +100,24 @@
 
 (defun process-edition (edition)
   (handler-case
-   (let ((data (edition-rows-to-strings (edition-dispart-rows edition))))
-     (append
-      `((title    . ,(parse-edition-title (cdr (assoc 'title data ))))
-        (language . ,(cdr (assoc 'language data))))
-      (list (assoc 'format (parse-edition-format (cdr (assoc 'format data)))))
-      (parse-edition-isbn-asin (cdr (assoc 'isbn-asin data)))))
+      (let* ((rows (edition-dispart-rows edition))
+             (book-id (lquery:$ (inline (cdr (assoc 'title rows)))
+                        "a.bookTitle" (attr "href") (node)))
+             (data (edition-rows-to-strings rows)))
+        (append
+         `((title    . ,(parse-edition-title (cdr (assoc 'title data ))))
+           (book-id  . , (parse-edition-book-id book-id))
+           (language . ,(cdr (assoc 'language data))))
+         (list (assoc 'format (parse-edition-format (cdr (assoc 'format data)))))
+         (parse-edition-isbn-asin (cdr (assoc 'isbn-asin data)))))
     (unsupported-row-structure () nil)))
 
 
-(defun get-all-editions (book-id &key (per-page 999) (filter-language nil))
+(defun get-all-editions (work-id &key (per-page 999) (filter-language nil))
   (let ((editions (remove-if #'null
                              (map 'list
                                   #'process-edition
-                                  (get-all-raw-editions book-id per-page)))))
+                                  (get-all-raw-editions work-id per-page)))))
     (if filter-language
         (remove-if (lambda (e) (string/= filter-language (cdr (assoc 'language e))))
                    editions)
@@ -155,9 +159,19 @@
 
 (defun parse-edition-title (title)
   "Strip edition title of series information in parentheses."
+  (multiple-value-bind (match groups)
+      (cl-ppcre:scan-to-strings "^(.*)(?:\\s\\(.*\\)){1}$" title)
+    (if (null groups)
+        (multiple-value-bind (match groups)
+            (cl-ppcre:scan-to-strings "^(.*)$" title)
+          (elt groups 0))
+        (elt groups 0))))
+
+
+(defun parse-edition-book-id (href)
   (multiple-value-bind (match result)
-      (cl-ppcre:scan-to-strings "^(.*)(?:\\s\\(.*\\))" title)
-    (elt result 0)))
+      (cl-ppcre:scan-to-strings "^/book/show/(\\d+).*$" href)
+    (parse-integer (elt result 0))))
 
 
 (defun try-matches (item patterns)
