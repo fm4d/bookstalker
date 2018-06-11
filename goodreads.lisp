@@ -15,6 +15,9 @@
 (define-condition unsupported-row-structure (error)
   ((text :initarg :text :reader text)))
 
+(define-condition unmatched-isbn-asin (error)
+  ((text :initarg :text :reader text)))
+
 
 (defun divide (sequence index)
   "Divides sequence to 2 sequences after element at index."
@@ -110,7 +113,8 @@
            (language . ,(cdr (assoc 'language data))))
          (list (assoc 'format (parse-edition-format (cdr (assoc 'format data)))))
          (parse-edition-isbn-asin (cdr (assoc 'isbn-asin data)))))
-    (unsupported-row-structure () nil)))
+    (unsupported-row-structure () nil)
+    (unmatched-isbn-asin () nil)))
 
 
 (defun get-all-editions (work-id &key (per-page 999) (filter-language nil))
@@ -211,11 +215,21 @@
                 (cons pattern (elt item 0))))
             items)))
 
+
 (defun parse-edition-isbn-asin (isbn-asin)
   "Parse string with isbn+isbn13/asin into alist with all those keys."
-  (let ((patterns '((isbn . "^(\\w{10})\\s\\(ISBN13:\\s(\\d{13})\\)$")
-                    (asin . "^(\\w{10})$"))))
-    (destructuring-bind (isbn-or-asin . groups) (try-matches isbn-asin patterns)
-      (if (eq isbn-or-asin 'isbn)
-          `((isbn . ,(elt groups 0)) (isbn13 . ,(elt groups 1)) (asin . nil))
-          `((asin . ,(elt groups 0)) (isbn . nil) (isbn13 . nil))))))
+  (let* ((patterns '((isbn   . "^(\\w{10})\\s\\(ISBN13:\\s(\\d{13})\\)$")
+                    (isbn13 . "^(\\d{13})$")
+                     (asin   . "^(\\w{10})$")))
+         (result (try-matches isbn-asin patterns)))
+    (if (null result)
+        (error 'unmatched-isbn-asin
+               :text (format nil "~a is not supported" isbn-asin)))
+    (destructuring-bind (type . groups) result
+      (let ((res `(,(cons 'isbn nil) ,(cons 'isbn13 nil) ,(cons 'asin nil))))
+        (cond ((eq type 'isbn) (progn
+                                 (setf (assoc-utils:aget res 'isbn) (elt groups 0))
+                                 (setf (assoc-utils:aget res 'isbn13) (elt groups 1))))
+              ((eq type 'isbn13) (setf (assoc-utils:aget res 'isbn13) (elt groups 0)))
+              ((eq type 'asin) (setf (assoc-utils:aget res 'asin) (elt groups 0))))
+        res))))
