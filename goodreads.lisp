@@ -104,17 +104,21 @@
 (defun process-edition (edition)
   (handler-case
       (let* ((rows (edition-dispart-rows edition))
-             (book-id (lquery:$ (inline (cdr (assoc 'title rows)))
-                        "a.bookTitle" (attr "href") (node)))
+             (book-link (lquery:$ (inline (cdr (assoc 'title rows)))
+                          "a.bookTitle" (attr "href") (node)))
              (data (edition-rows-to-strings rows)))
         (append
          `((title    . ,(parse-edition-title (cdr (assoc 'title data ))))
-           (book-id  . , (parse-edition-book-id book-id))
+           (book-id  . , (parse-edition-book-id book-link))
            (language . ,(cdr (assoc 'language data))))
          (list (assoc 'format (parse-edition-format (cdr (assoc 'format data)))))
          (parse-edition-isbn-asin (cdr (assoc 'isbn-asin data)))))
-    (unsupported-row-structure () nil)
-    (unmatched-isbn-asin () nil)))
+    (unsupported-row-structure (condition)
+      (print (text condition))
+      nil)
+    (unmatched-isbn-asin (condition)
+      (print (text condition))
+      nil)))
 
 
 (defun get-all-editions (work-id &key (per-page 999) (filter-language nil))
@@ -131,7 +135,7 @@
 (defun edition-dispart-details (details)
   (let ((data-rows (lquery:$ details "div.dataRow" "div.dataValue")))
     (if (/= (length data-rows) 4)
-        (error 'unsupported-row-structure :text "Wrong amount of rows in details"))
+        (error 'unsupported-row-structure))
     `((authors   . ,(elt data-rows 0))
       (isbn-asin . ,(elt data-rows 1))
       (language  . ,(elt data-rows 2))
@@ -142,22 +146,35 @@
   (let* ((data-rows (lquery:$ raw-edition (children)
                       (filter (lambda (n) (string= (lquery-funcs:attr n "class")
                                                    "dataRow")))))
-         (rows-count (length data-rows)))
+         (rows-count (length data-rows))
+         (title (elt data-rows 0)))
     (if (not (member rows-count '(3 4)))
-        (error 'unsupported-row-structure :text "Unsupported edition rows amount."))
-    (append `((title     . ,(elt data-rows 0))
+        (error 'unsupported-row-structure
+               :text (format nil "ID: ~a | Unsupported edition structure."
+                             (parse-edition-book-id (lquery:$ title "a.bookTitle"
+                                                      (attr "href") (node))))))
+    (append `((title     . ,title)
               (published . ,(if (= rows-count 4) (elt data-rows 1)))
               (format    . ,(elt data-rows (- rows-count 2))))
-            (edition-dispart-details (lquery:$ raw-edition "div.hideDetails" (node))))))
+            (handler-case (edition-dispart-details
+                           (lquery:$ raw-edition "div.hideDetails" (node)))
+              (unsupported-row-structure ()
+                (error 'unsupported-row-structure
+                       :text (format nil
+                                     "ID: ~a | Unsupported edition details structure."
+                                     (parse-edition-book-id (lquery:$ title "a.bookTitle"
+                                                              (attr "href") (node))))))))))
 
+
+(defun row-to-string (row)
+  (str:join " " (mapcar #'str:trim
+                        (remove-if #'str:blankp
+                                   (str:lines (lquery:$ row (text) (node)))))))
 
 (defun edition-rows-to-strings (row-pairs)
   (mapcar (lambda (row-pair)
             (destructuring-bind (name . row) row-pair
-              `(,name . ,(str:join " " (mapcar #'str:trim
-                                               (remove-if #'str:blankp
-                                                          (str:lines
-                                                           (lquery:$ row (text) (node)))))))))
+              `(,name . ,(row-to-string row))))
           row-pairs))
 
 
@@ -224,7 +241,7 @@
          (result (try-matches isbn-asin patterns)))
     (if (null result)
         (error 'unmatched-isbn-asin
-               :text (format nil "~a is not supported" isbn-asin)))
+               :text (format nil "ISBN ~a is not supported" isbn-asin)))
     (destructuring-bind (type . groups) result
       (let ((res `(,(cons 'isbn nil) ,(cons 'isbn13 nil) ,(cons 'asin nil))))
         (cond ((eq type 'isbn) (progn
