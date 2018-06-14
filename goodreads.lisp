@@ -1,9 +1,4 @@
-(ql:quickload "drakma")
-(ql:quickload "plump")
-(ql:quickload "lquery")
-(ql:quickload "str")
-(ql:quickload "cl-ppcre")
-(ql:quickload "assoc-utils")
+(in-package :bookstalker)
 
 (declaim (optimize (debug 3)))
 
@@ -28,9 +23,9 @@
 
 
 (defun create-url-with-parameters (url parameters)
-  (apply #'str:concat url "?"
+  (apply #'concat url "?"
          (mapcar (lambda (alist)
-                   (str:concat (car alist) "=" (cdr alist) "&"))
+                   (concat (car alist) "=" (cdr alist) "&"))
                  parameters)))
 
 
@@ -57,7 +52,7 @@
 
 (defun get-raw-books (page)
   (let ((dom (plump:parse page)))
-    (coerce (lquery:$ dom "reviews" "review") 'list)))
+    (coerce ($ dom "reviews" "review") 'list)))
 
 
 (defun get-all-raw-books-from-shelve (&optional (shelf-name "to-read"))
@@ -77,9 +72,9 @@
 
 
 (defun get-book-basic-data (book)
-  `((title   . ,(lquery:$ book "title_without_series" (node) (text)))
-    (author  . ,(lquery:$ book "authors" "name" (node) (text)))
-    (work-id . ,(parse-integer (lquery:$ book "work" "id" (node) (text))))))
+  `((title   . ,($ book "title_without_series" (node) (text)))
+    (author  . ,($ book "authors" "name" (node) (text)))
+    (work-id . ,(parse-integer ($ book "work" "id" (node) (text))))))
 
 
 (defun get-all-books-from-shelve (&optional (shelf-name "to-read"))
@@ -98,21 +93,21 @@
                       per-page))
          (html (drakma:http-request url :method :get))
          (root (plump:parse html)))
-    (lquery:$ root "div.editionData")))
+    ($ root "div.editionData")))
 
 
 (defun process-edition (edition)
   (handler-case
       (let* ((rows (edition-dispart-rows edition))
-             (book-link (lquery:$ (inline (cdr (assoc 'title rows)))
+             (book-link ($ (inline (aget rows 'title))
                           "a.bookTitle" (attr "href") (node)))
              (data (edition-rows-to-strings rows)))
         (append
-         `((title    . ,(parse-edition-title (cdr (assoc 'title data ))))
+         `((title    . ,(parse-edition-title (aget data 'title )))
            (book-id  . , (parse-edition-book-id book-link))
-           (language . ,(cdr (assoc 'language data))))
-         (list (assoc 'format (parse-edition-format (cdr (assoc 'format data)))))
-         (parse-edition-isbn-asin (cdr (assoc 'isbn-asin data)))))
+           (language . ,(aget data 'language)))
+         (list (assoc 'format (parse-edition-format (aget data 'format))))
+         (parse-edition-isbn-asin (aget data 'isbn-asin))))
     (unsupported-row-structure (condition)
       (print (text condition))
       nil)
@@ -127,13 +122,13 @@
                                   #'process-edition
                                   (get-all-raw-editions work-id per-page)))))
     (if filter-language
-        (remove-if (lambda (e) (string/= filter-language (cdr (assoc 'language e))))
+        (remove-if (lambda (e) (string/= filter-language (aget e 'language)))
                    editions)
         editions)))
 
 
 (defun edition-dispart-details (details)
-  (let ((data-rows (lquery:$ details "div.dataRow" "div.dataValue")))
+  (let ((data-rows ($ details "div.dataRow" "div.dataValue")))
     (if (/= (length data-rows) 4)
         (error 'unsupported-row-structure))
     `((authors   . ,(elt data-rows 0))
@@ -143,7 +138,7 @@
 
 
 (defun edition-dispart-rows (raw-edition)
-  (let* ((data-rows (lquery:$ raw-edition (children)
+  (let* ((data-rows ($ raw-edition (children)
                       (filter (lambda (n) (string= (lquery-funcs:attr n "class")
                                                    "dataRow")))))
          (rows-count (length data-rows))
@@ -151,25 +146,25 @@
     (if (not (member rows-count '(3 4)))
         (error 'unsupported-row-structure
                :text (format nil "ID: ~a | Unsupported edition structure."
-                             (parse-edition-book-id (lquery:$ title "a.bookTitle"
+                             (parse-edition-book-id ($ title "a.bookTitle"
                                                       (attr "href") (node))))))
     (append `((title     . ,title)
               (published . ,(if (= rows-count 4) (elt data-rows 1)))
               (format    . ,(elt data-rows (- rows-count 2))))
             (handler-case (edition-dispart-details
-                           (lquery:$ raw-edition "div.hideDetails" (node)))
+                           ($ raw-edition "div.hideDetails" (node)))
               (unsupported-row-structure ()
                 (error 'unsupported-row-structure
                        :text (format nil
                                      "ID: ~a | Unsupported edition details structure."
-                                     (parse-edition-book-id (lquery:$ title "a.bookTitle"
+                                     (parse-edition-book-id ($ title "a.bookTitle"
                                                               (attr "href") (node))))))))))
 
 
 (defun row-to-string (row)
-  (str:join " " (mapcar #'str:trim
-                        (remove-if #'str:blankp
-                                   (str:lines (lquery:$ row (text) (node)))))))
+  (join " " (mapcar #'trim
+                        (remove-if #'blankp
+                                   (lines ($ row (text) (node)))))))
 
 (defun edition-rows-to-strings (row-pairs)
   (mapcar (lambda (row-pair)
@@ -205,12 +200,12 @@
 
 
 (defun split-edition (edition)
-  (let* ((items (str:split ", " edition))
+  (let* ((items (split ", " edition))
         (items-len (length items)))
     (if (> items-len 3)
         (destructuring-bind (edition format-pages)
             (divide items (- items-len 3))
-          (cons (str:join ", " edition) format-pages))
+          (cons (join ", " edition) format-pages))
         items)))
 
 
@@ -218,7 +213,7 @@
   "Parse string with edition, format and pages into alist with those keys."
   (let ((items (split-edition format))
         (patterns
-          `((format . ,(str:concat
+          `((format . ,(concat
                         "(^Paperback$|^Hardcover$|^Kindle\\sEdition$|^ebook$|"
                         "^Audiobook$|^Mass\\sMarker\\sPaperback$|^Audio\\sCD$|"
                         "^nook$|^Library\\sBinding$|^Audio\\sCassette$|"
@@ -245,8 +240,8 @@
     (destructuring-bind (type . groups) result
       (let ((res `(,(cons 'isbn nil) ,(cons 'isbn13 nil) ,(cons 'asin nil))))
         (cond ((eq type 'isbn) (progn
-                                 (setf (assoc-utils:aget res 'isbn) (elt groups 0))
-                                 (setf (assoc-utils:aget res 'isbn13) (elt groups 1))))
-              ((eq type 'isbn13) (setf (assoc-utils:aget res 'isbn13) (elt groups 0)))
-              ((eq type 'asin) (setf (assoc-utils:aget res 'asin) (elt groups 0))))
+                                 (setf (aget res 'isbn) (elt groups 0))
+                                 (setf (aget res 'isbn13) (elt groups 1))))
+              ((eq type 'isbn13) (setf (aget res 'isbn13) (elt groups 0)))
+              ((eq type 'asin) (setf (aget res 'asin) (elt groups 0))))
         res))))
