@@ -10,7 +10,7 @@
 (define-condition unsupported-row-structure (error)
   ((text :initarg :text :reader text)))
 
-(define-condition unmatched-isbn-asin (error)
+(define-condition no-isbn-matched (error)
   ((text :initarg :text :reader text)))
 
 
@@ -29,7 +29,8 @@
                  parameters)))
 
 
-(defun get-list-of-shelves ()
+;; Unsused
+(defun list-shelves ()
   (flexi-streams:octets-to-string
    (drakma:http-request "https://www.goodreads.com/shelf/list.xml"
                         :method :get
@@ -37,54 +38,45 @@
                                       ("user_id" . ,+user-id+)))))
 
 
-(defun get-raw-page-from-shelve (shelf-name &optional (page "1") (per-page "200"))
-  (flexi-streams:octets-to-string
-   (drakma:http-request (create-url-with-parameters
-                         "https://www.goodreads.com/review/list"
-                         `(("v" . "2")
-                           ("per_page" . ,per-page)
-                           ("page" . ,page)
-                           ("shelf" . ,shelf-name)
-                           ("key" . ,+user-key+)
-                           ("id" . ,+user-id+)))
-                        :method :get)))
+(defun all-raw-works-from-shelve (shelf-name &optional (per-page "200"))
+  (labels ((raw-page-from-shelve (page)
+             (flexi-streams:octets-to-string
+              (drakma:http-request (create-url-with-parameters
+                                    "https://www.goodreads.com/review/list"
+                                    `(("v" . "2")
+                                      ("per_page" . ,per-page)
+                                      ("page" . ,(write-to-string page))
+                                      ("shelf" . ,shelf-name)
+                                      ("key" . ,+user-key+)
+                                      ("id" . ,+user-id+)))
+                                   :method :get)))
+           (raw-works-from-page (page)
+               (let ((dom (plump:parse page)))
+                 (coerce ($ dom "reviews" "review") 'list))))
+    (loop
+      with page = 1
+      with results = nil
+      with res = nil
+      do
+         (setf res (raw-works-from-page (raw-page-from-shelve page)))
+         (setf results (append results res))
+         (incf page)
+      when (not (= (length res) 200))
+        return results)))
 
 
-(defun get-raw-books (page)
-  (let ((dom (plump:parse page)))
-    (coerce ($ dom "reviews" "review") 'list)))
+(defun work-extract-basic-data (work)
+  `((title   . ,($ work "title_without_series" (node) (text)))
+    (author  . ,($ work "authors" "name" (node) (text)))
+    (id . ,(parse-integer ($ work "work" "id" (node) (text))))))
 
 
-(defun get-all-raw-books-from-shelve (&optional (shelf-name "to-read"))
-  (loop
-    with page = 1
-    with results = nil
-    with res = nil
-    do
-       (setf res (get-raw-books
-                  (get-raw-page-from-shelve shelf-name
-                                            (write-to-string page)
-                                            "200")))
-       (setf results (append results res))
-       (incf page)
-    when (not (= (length res) 200))
-      return results))
+(defun all-works-from-shelve (&optional (shelf-name "to-read"))
+  "Download all works in shelve via API and return them in alist."
+  (mapcar #'work-extract-basic-data (all-raw-works-from-shelve shelf-name)))
 
 
-(defun get-book-basic-data (book)
-  `((title   . ,($ book "title_without_series" (node) (text)))
-    (author  . ,($ book "authors" "name" (node) (text)))
-    (work-id . ,(parse-integer ($ book "work" "id" (node) (text))))))
-
-
-(defun get-all-books-from-shelve (&optional (shelf-name "to-read"))
-  "Download all books in shelve via API and return them in alist."
-  (mapcar #'get-book-basic-data (get-all-raw-books-from-shelve shelf-name)))
-
-
-
-
-(defun get-all-raw-editions (work-id per-page)
+(defun all-raw-editions (work-id per-page)
   "Manualy parse HTML, editions-api is not for public.
  Official per-page limit is 100, but it works :)"
   (let* ((url (format nil
@@ -99,30 +91,30 @@
 (defun process-edition (edition)
   (handler-case
       (let* ((rows (edition-dispart-rows edition))
-             (book-link ($ (inline (aget rows 'title))
-                          "a.bookTitle" (attr "href") (node)))
+             (link ($ (inline (aget rows 'title))
+                     "a.bookTitle" (attr "href") (node)))
              (data (edition-rows-to-strings rows)))
         (append
          `((title    . ,(parse-edition-title (aget data 'title )))
-           (book-id  . , (parse-edition-book-id book-link))
+           (id       . , (parse-edition-id link))
            (language . ,(aget data 'language)))
          (list (assoc 'format (parse-edition-format (aget data 'format))))
-         (parse-edition-isbn-asin (aget data 'isbn-asin))))
+         (parse-edition-isbns (aget data 'isbns))))
     (unsupported-row-structure (condition)
       (print (text condition))
       nil)
-    (unmatched-isbn-asin (condition)
+    (no-isbn-matched (condition)
       (print (text condition))
       nil)))
 
 
-(defun get-all-editions (work-id &key (per-page 999) (filter-language nil))
+(defun all-editions (work-id &key (per-page 999) (language nil))
   (let ((editions (remove-if #'null
                              (map 'list
                                   #'process-edition
-                                  (get-all-raw-editions work-id per-page)))))
-    (if filter-language
-        (remove-if (lambda (e) (string/= filter-language (aget e 'language)))
+                                  (all-raw-editions work-id per-page)))))
+    (if language
+        (remove-if (lambda (e) (string/= language (aget e 'language)))
                    editions)
         editions)))
 
@@ -132,7 +124,7 @@
     (if (/= (length data-rows) 4)
         (error 'unsupported-row-structure))
     `((authors   . ,(elt data-rows 0))
-      (isbn-asin . ,(elt data-rows 1))
+      (isbns . ,(elt data-rows 1))
       (language  . ,(elt data-rows 2))
       (rating    . ,(elt data-rows 3)))))
 
@@ -146,8 +138,8 @@
     (if (not (member rows-count '(3 4)))
         (error 'unsupported-row-structure
                :text (format nil "ID: ~a | Unsupported edition structure."
-                             (parse-edition-book-id ($ title "a.bookTitle"
-                                                      (attr "href") (node))))))
+                             (parse-edition-id ($ title "a.bookTitle"
+                                                 (attr "href") (node))))))
     (append `((title     . ,title)
               (published . ,(if (= rows-count 4) (elt data-rows 1)))
               (format    . ,(elt data-rows (- rows-count 2))))
@@ -157,37 +149,19 @@
                 (error 'unsupported-row-structure
                        :text (format nil
                                      "ID: ~a | Unsupported edition details structure."
-                                     (parse-edition-book-id ($ title "a.bookTitle"
-                                                              (attr "href") (node))))))))))
+                                     (parse-edition-id ($ title "a.bookTitle"
+                                                         (attr "href") (node))))))))))
 
-
-(defun row-to-string (row)
-  (join " " (mapcar #'trim
-                        (remove-if #'blankp
-                                   (lines ($ row (text) (node)))))))
 
 (defun edition-rows-to-strings (row-pairs)
-  (mapcar (lambda (row-pair)
-            (destructuring-bind (name . row) row-pair
-              `(,name . ,(row-to-string row))))
-          row-pairs))
-
-
-(defun parse-edition-title (title)
-  "Strip edition title of series information in parentheses."
-  (multiple-value-bind (match groups)
-      (cl-ppcre:scan-to-strings "^(.*)(?:\\s\\(.*\\)){1}$" title)
-    (if (null groups)
-        (multiple-value-bind (match groups)
-            (cl-ppcre:scan-to-strings "^(.*)$" title)
-          (elt groups 0))
-        (elt groups 0))))
-
-
-(defun parse-edition-book-id (href)
-  (multiple-value-bind (match result)
-      (cl-ppcre:scan-to-strings "^/book/show/(\\d+).*$" href)
-    (parse-integer (elt result 0))))
+  (labels ((row-to-string (row)
+             (join " " (mapcar #'trim
+                               (remove-if #'blankp
+                                          (lines ($ row (text) (node))))))))
+    (mapcar (lambda (row-pair)
+              (destructuring-bind (name . row) row-pair
+                `(,name . ,(row-to-string row))))
+            row-pairs)))
 
 
 (defun try-matches (item patterns)
@@ -201,12 +175,29 @@
 
 (defun split-edition (edition)
   (let* ((items (split ", " edition))
-        (items-len (length items)))
+         (items-len (length items)))
     (if (> items-len 3)
         (destructuring-bind (edition format-pages)
             (divide items (- items-len 3))
           (cons (join ", " edition) format-pages))
         items)))
+
+
+(defun parse-edition-title (title)
+  "Strip edition title of series information in parentheses."
+  (multiple-value-bind (match groups)
+      (cl-ppcre:scan-to-strings "^(.*)(?:\\s\\(.*\\)){1}$" title)
+    (if (null groups)
+        (multiple-value-bind (match groups)
+            (cl-ppcre:scan-to-strings "^(.*)$" title)
+          (elt groups 0))
+        (elt groups 0))))
+
+
+(defun parse-edition-id (href)
+  (multiple-value-bind (match result)
+      (cl-ppcre:scan-to-strings "^/book/show/(\\d+).*$" href)
+    (parse-integer (elt result 0))))
 
 
 (defun parse-edition-format (format)
@@ -228,15 +219,15 @@
             items)))
 
 
-(defun parse-edition-isbn-asin (isbn-asin)
+(defun parse-edition-isbns (isbns)
   "Parse string with isbn+isbn13/asin into alist with all those keys."
   (let* ((patterns '((isbn   . "^(\\w{10})\\s\\(ISBN13:\\s(\\d{13})\\)$")
                     (isbn13 . "^(\\d{13})$")
                      (asin   . "^(\\w{10})$")))
-         (result (try-matches isbn-asin patterns)))
+         (result (try-matches isbns patterns)))
     (if (null result)
-        (error 'unmatched-isbn-asin
-               :text (format nil "ISBN ~a is not supported" isbn-asin)))
+        (error 'no-isbn-matched
+               :text (format nil "ISBN ~a is not supported" isbns)))
     (destructuring-bind (type . groups) result
       (let ((res `(,(cons 'isbn nil) ,(cons 'isbn13 nil) ,(cons 'asin nil))))
         (cond ((eq type 'isbn) (progn
