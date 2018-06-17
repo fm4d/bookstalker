@@ -5,4 +5,5 @@
   :components ((:file "package")
                (:file "bookdepository")
                (:file "goodreads")
-               (:file "db")))
+               (:file "db")
+               (:file "bookstalker")))

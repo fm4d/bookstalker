@@ -4,8 +4,7 @@
 
 ;===========================================================
 
-(defparameter +user-id+ "76812964")
-(defparameter +user-key+ "OY2rDbQV8HRskYZNMEkUPA")
+
 
 (define-condition unsupported-row-structure (error)
   ((text :initarg :text :reader text)))
