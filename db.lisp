@@ -45,17 +45,8 @@
   (dbi:with-connection (conn :sqlite3 :database-name "goodreads_db.db")
     (let ((res (dbi:execute (dbi:prepare conn query))))
       (if res
-          (mapcar #'plist-alist (dbi:fetch-all res))
+          (mapcar #'plist-alist-sym (dbi:fetch-all res))
           nil))))
-
-
-(defun plist-alist (plist)
-  (loop for (k v) on plist by #'cddr
-        collect (cons (read-from-string (string-downcase k)) v)))
-
-
-(defun check-nil (item)
-  (if (null item) "" item))
 
 
 (defun insert-work (work)
@@ -68,17 +59,18 @@
 
 
 (defun insert-edition (edition work-id)
-  (execute
-   (format nil
-           (concat "INSERT INTO edition (id, work_id, language, format, isbn, isbn13, asin) "
-                   "VALUES (\'~d\', \'~d\', \'~a\', \'~a\', \'~a\', \'~a\', \'~a\')")
-           (aget edition 'id)
-           work-id
-           (aget edition 'language)
-           (aget edition 'format)
-           (check-nil (aget edition 'isbn))
-           (check-nil (aget edition 'isbn13))
-           (check-nil (aget edition 'asin)))))
+  (labels ((check-nil (item) (if (null item) "" item)))
+    (execute
+     (format nil
+             (concat "INSERT INTO edition (id, work_id, language, format, isbn, isbn13, asin) "
+                     "VALUES (\'~d\', \'~d\', \'~a\', \'~a\', \'~a\', \'~a\', \'~a\')")
+             (aget edition 'id)
+             work-id
+             (aget edition 'language)
+             (aget edition 'format)
+             (check-nil (aget edition 'isbn))
+             (check-nil (aget edition 'isbn13))
+             (check-nil (aget edition 'asin))))))
 
 
 (defun delete-all-editions (work-id)

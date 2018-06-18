@@ -3,6 +3,7 @@
                "alexandria")
   :serial T
   :components ((:file "package")
+               (:file "utils")
                (:file "bookdepository")
                (:file "goodreads")
                (:file "db")
