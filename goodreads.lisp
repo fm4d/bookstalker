@@ -98,7 +98,10 @@
            (id       . , (parse-edition-id link))
            (language . ,(aget data 'language)))
          (list (assoc 'format (parse-edition-format (aget data 'format))))
-         (parse-edition-isbns (aget data 'isbns))))
+         (parse-edition-isbns (aget data 'isbns)
+                              (read-from-string (subseq (aget data 'isbn-title)
+                                                        0
+                                                        (- (length (aget data 'isbn-title)) 1))))))
     (unsupported-row-structure (condition)
       (print (text condition))
       nil)
@@ -119,13 +122,15 @@
 
 
 (defun edition-dispart-details (details)
-  (let ((data-rows ($ details "div.dataRow" "div.dataValue")))
+  (let* ((data-rows ($ details "div.dataRow"))
+         (data-values ($ data-rows "div.dataValue")))
     (if (/= (length data-rows) 4)
         (error 'unsupported-row-structure))
-    `((authors   . ,(elt data-rows 0))
-      (isbns . ,(elt data-rows 1))
-      (language  . ,(elt data-rows 2))
-      (rating    . ,(elt data-rows 3)))))
+    `((authors    . ,(elt data-values 0))
+      (isbns      . ,(elt data-values 1))
+      (isbn-title . ,($ (inline (elt data-rows 1)) "div.dataTitle" (node)))
+      (language   . ,(elt data-values 2))
+      (rating     . ,(elt data-values 3)))))
 
 
 (defun edition-dispart-rows (raw-edition)
@@ -218,20 +223,44 @@
             items)))
 
 
-(defun parse-edition-isbns (isbns)
-  "Parse string with isbn+isbn13/asin into alist with all those keys."
-  (let* ((patterns '((isbn   . "^(\\w{10})\\s\\(ISBN13:\\s(\\d{13})\\)$")
-                    (isbn13 . "^(\\d{13})$")
-                     (asin   . "^(\\w{10})$")))
-         (result (try-matches isbns patterns)))
+;; (defun parse-edition-isbns (isbns isbn-title)
+;;   "Parse string with isbn+isbn13/asin into alist with all those keys."
+;;   (let* ((patterns '((isbn   . "^(\\w{10})\\s\\(ISBN13:\\s(\\d{13})\\)$")
+;;                     (isbn13 . "^(\\d{13})$")
+;;                      (asin   . "^(\\w{10})$")))
+;;          (result (try-matches isbns patterns)))
+;;     (if (null result)
+;;         (error 'no-isbn-matched
+;;                :text (format nil "ISBN ~a is not supported" isbns)))
+;;     (destructuring-bind (type . groups) result
+;;       (let ((res `(,(cons 'isbn nil) ,(cons 'isbn13 nil) ,(cons 'asin nil))))
+;;         (cond ((eq type 'isbn) (progn
+;;                                  (setf (aget res 'isbn) (elt groups 0))
+;;                                  (setf (aget res 'isbn13) (elt groups 1))))
+;;               ((eq type 'isbn13) (setf (aget res 'isbn13) (elt groups 0)))
+;;               ((eq type 'asin) (setf (aget res 'asin) (elt groups 0))))
+;;         res))))
+
+
+(defun parse-edition-isbns (isbns isbn-title)
+  (let* ((patterns '((isbn . ((isbn+isbn13 . "^(\\w{10})\\s\\(ISBN13:\\s(\\d{13})\\)$")
+                               (isbn        . "^(\\w{10})$")))
+                     (isbn13 . ((isbn13 . "^(\\d{13})$")))
+                     (asin   . ((asin   . "^(\\w{10})$")))))
+         (result (try-matches isbns (aget patterns isbn-title))))
     (if (null result)
         (error 'no-isbn-matched
                :text (format nil "ISBN ~a is not supported" isbns)))
     (destructuring-bind (type . groups) result
       (let ((res `(,(cons 'isbn nil) ,(cons 'isbn13 nil) ,(cons 'asin nil))))
-        (cond ((eq type 'isbn) (progn
-                                 (setf (aget res 'isbn) (elt groups 0))
-                                 (setf (aget res 'isbn13) (elt groups 1))))
+        (cond ((eq type 'isbn+isbn13) (progn
+                                        (setf (aget res 'isbn) (elt groups 0))
+                                        (setf (aget res 'isbn13) (elt groups 1))))
+              ((eq type 'isbn) (setf (aget res 'isbn) (elt groups 0)))
               ((eq type 'isbn13) (setf (aget res 'isbn13) (elt groups 0)))
               ((eq type 'asin) (setf (aget res 'asin) (elt groups 0))))
         res))))
+
+
+
+

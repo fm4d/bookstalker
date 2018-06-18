@@ -53,6 +53,7 @@
   (loop for (k v) on plist by #'cddr
         collect (cons (read-from-string (string-downcase k)) v)))
 
+
 (defun check-nil (item)
   (if (null item) "" item))
 
@@ -110,8 +111,10 @@
            "SELECT * FROM work WHERE id = ~d ;"
            work-id)))
 
+
 (defun load-new-work (work)
   (insert-work-with-editions work (all-editions (aget work 'id))))
+
 
 (defun update-work (work)
   (let ((id (aget work 'id)))
