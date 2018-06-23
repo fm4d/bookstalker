@@ -4,9 +4,12 @@
 
 ;===========================================================
 
-(defparameter +user-id+ "76812964")
-(defparameter +user-key+ "OY2rDbQV8HRskYZNMEkUPA")
-(defparameter +update-frequency+ 604800)
+
+
+(defun load-configuration (&optional (filename "config.lisp"))
+  (handler-case (load filename)
+      (sb-int:simple-file-error (c)
+        (print "Unable to load configuration, file not found."))))
 
 
 (defun load-shelve-in-db (&optional (shelf-name "to-read"))
@@ -15,14 +18,5 @@
          (new-works (remove-if #'work-in-db-p works)))
     (mapc #'load-new-work new-works)
     (mapc #'update-work outdated-works)))
-
-
-;; (defun ensure-editions (work-id)
-;;   (let ((work (select-work work-id)))
-;;     (if (not work) 
-
-
-;; (defun gather-prices (work-id &optional (format '("Paperback" "Hardcover")) (language "English"))
-;;   ()
 
 
