@@ -25,32 +25,37 @@
 
 
 (defun process-single-result (result)
-  (let ((unavailable  ($ result "p.red-text" (node))))
-    (if (and unavailable (string= (trim ($ unavailable (text))) "Currently unavailable"))
-        nil))
-  (let ((add-to-basket  ($ result "div.copy-content" "a.add-to-basket" (node))))
-    `((isbn     . ,($ add-to-basket (attr "data-isbn")))
-      (currency . ,($ add-to-basket (attr "data-currency")))
-      (price    . ,($ add-to-basket (attr "data-price"))))))
+  (let ((unavailable  ($ result "p.red-text.bold" (node)))
+        (add-to-basket  ($ result "div.checkout-tools" "a.add-to-basket" (node))))
+    (if (and unavailable
+             (string= ($ unavailable (node) (text)) "Currently unavailable"))
+        nil
+        `(((isbn     . ,($ add-to-basket (node) (attr "data-isbn")))
+          (currency . ,($ add-to-basket (node) (attr "data-currency")))
+          (price    . ,($ add-to-basket (node) (attr "data-price"))))))))
 
 
 (defun process-multiple-results (results)
   (let ((add-to-baskets ($ results "div.btn-wrap" "a.add-to-basket")))
-    (mapcar (lambda (basket)
-              `((isbn     . ,($ basket (attr "data-isbn")))
-                (currency . ,($ basket (attr "data-currency")))
-                (price    . ,($ basket (attr "data-price")))))
-            add-to-baskets)))
+    (map 'list (lambda (basket)
+                 `((isbn     . ,($ basket (node) (attr "data-isbn")))
+                   (currency . ,($ basket (node) (attr "data-currency")))
+                   (price    . ,($ basket (node) (attr "data-price")))))
+         add-to-baskets)))
 
 
 (defun route-results (results)
   (let ((search-results ($ results "div.main-content" "h1" (node)))
-        (advanced-search ($ results "div.content-wrap" "content" "h1" (node)))
-        (single-item ($ results "div.page-slide" "item-wrap" (node))))
-    (if (string= (trim ($ advanced-search (text))) "Advanced search") 'none)
-    (if (string= (trim ($ search-results (text))) "Search results") 'multiple)
-    (if single-item 'single)
-    (error "Unable to route results.")))
+        (advanced-search ($ results "div.content-wrap" "div.content" "h1" (node)))
+        (single-item ($ results "div.page-slide" "div.item-wrap" (node))))
+
+    (cond ((and advanced-search (string= ($ advanced-search (node) (text))
+                                         "Advanced Search"))
+           'none)
+          ((and search-results (string= (trim ($ search-results (node) (text))) "Search results"))
+           'multiple)
+          (single-item 'single)
+          (t (error "Unable to route results.")))))
 
 
 
@@ -67,18 +72,6 @@
 ;;       (format . ,format)
 ;;       (isbn . ,isbn))))
 
-
-
-(defun book-suitable-p (book)
-  "Only available books (with price) and only Paperbacks and Hardbacks, no CDs etc."
-   (assoc 'price book))
-
-
-
-; Fix search for one book
-;; (defun find-all-isbns (isbns)
-;;   (remove-if-not #'book-suitable-p
-;;                  (map 'list #'process-book (search-by-isbns isbns))))
 
 
 (defun find-all-isbns (isbns &optional (currency "USD"))
