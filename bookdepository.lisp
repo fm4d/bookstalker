@@ -77,6 +77,7 @@
           ((eq route 'multiple) (mapcar #'process-book-item
                                  (get-books-from-all-pages raw-response isbns currency))))))
 
+
 (defun get-books-from-all-pages (raw-response isbns currency)
   (let ((page-count (ceiling (multiple-value-bind (match groups)
                                  (cl-ppcre:scan-to-strings

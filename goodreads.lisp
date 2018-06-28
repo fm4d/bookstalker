@@ -95,14 +95,21 @@
       nil)))
 
 
-(defun all-editions (work-id &key (per-page 999) (language nil))
+(defun all-editions (work-id &key (per-page 999) (language nil) (formats nil))
   (let ((editions (remove-if #'null
                              (map 'list
                                   #'process-edition
                                   (all-raw-editions work-id per-page)))))
-    (if language
-        (remove-if (lambda (e) (string/= language (aget e 'language)))
-                   editions)
+    (labels ((filter-language ()
+               (setf editions (remove-if (lambda (e) (string/= language (aget e 'language)))
+                                         editions)))
+             (filter-format ()
+               (setf editions (remove-if (lambda (e)
+                                           (not
+                                            (member (aget e 'format) formats :test #'string=)))
+                                         editions))))
+      (if language (filter-language))
+      (if formats (filter-format))
         editions)))
 
 
