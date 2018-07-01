@@ -1,3 +1,3 @@
-'(+user-id+ ""
-  +user-key+ ""
-  +update-frequency+ 604800)
+(defparameter +user-id+ "")
+(defparameter +user-key+ "")
+(defparameter +update-frequency+ 604800)

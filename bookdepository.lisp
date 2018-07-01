@@ -45,14 +45,15 @@
 (defun process-book-item (item)
   (let ((basket ($ item "div.btn-wrap" "a.add-to-basket" (node)))
         (savings-splat ($ item "div.savings-splat" (node))))
-    `((isbn     . ,($ basket (node) (attr "data-isbn")))
-      (currency . ,($ basket (node) (attr "data-currency")))
-      (price    . ,($ basket (node) (attr "data-price")))
-      (discount . ,(if (null savings-splat) 0
-                       (multiple-value-bind (match groups) (cl-ppcre:scan-to-strings
-                                                            "^(\\d{1,3})%off$"
-                                                            ($ savings-splat (node) (text)))
-                         (elt groups 0)))))))
+    (if (null basket) nil
+        `((isbn     . ,($ basket (node) (attr "data-isbn")))
+          (currency . ,($ basket (node) (attr "data-currency")))
+          (price    . ,($ basket (node) (attr "data-price")))
+          (discount . ,(if (null savings-splat) 0
+                           (multiple-value-bind (match groups) (cl-ppcre:scan-to-strings
+                                                                "^(\\d{1,3})%off$"
+                                                                ($ savings-splat (node) (text)))
+                             (elt groups 0))))))))
 
 
 (defun route-results (raw-response)
@@ -69,13 +70,26 @@
           (t (error "Unable to route results.")))))
 
 
-(defun find-all-isbns (isbns &optional (currency "USD"))
-  (let* ((raw-response (search-by-isbns isbns currency))
-         (route (route-results raw-response)))
-    (cond ((eq route 'none) nil)
-          ((eq route 'single) (process-single-result raw-response))
-          ((eq route 'multiple) (mapcar #'process-book-item
-                                 (get-books-from-all-pages raw-response isbns currency))))))
+(defun find-all-isbns (isbns &optional (currency "USD") (chunk-size 90))
+  (labels ((+-with-max (x y max)
+             (let ((res (+ x y)))
+               (if (> res max) max res))))
+    (let ((chunks (loop with len = (length isbns)
+                        for i from 0 to len by chunk-size
+                        collect (subseq isbns i (+-with-max i chunk-size len)))))
+      (apply #'append
+             (mapcar (lambda (ch) (find-isbns ch currency)) chunks)))))
+
+
+(defun find-isbns (isbns currency)
+    (let* ((raw-response (search-by-isbns isbns currency))
+           (route (route-results raw-response)))
+      (cond ((eq route 'none) nil)
+            ((eq route 'single) (process-single-result raw-response))
+            ((eq route 'multiple)
+             (loop append (remove-if #'null
+                                     (mapcar #'process-book-item
+                                             (get-books-from-all-pages raw-response isbns currency))))))))
 
 
 (defun get-books-from-all-pages (raw-response isbns currency)
